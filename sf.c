@@ -2,8 +2,8 @@
 #include <raymath.h>
 #include <stdio.h>
 #include <stdlib.h>
-Vector2 g_playerspeed;
-Vector2 g_playerpos;
+
+// #define DEBUG_HITBOX
 
 #define PLAYER_FRICTION (0.005f)
 #define PLAYER_ACCEL (0.05f)
@@ -13,6 +13,12 @@ Vector2 g_playerpos;
 
 #define FIGHTERS_COUNT (20)
 #define FIGHTERS_MAX_SPEED (1.5f)
+
+#define PLAYER_MAX_SHOTS (20)
+#define PLAYER_BULLET_SPEED (5.0f)
+
+#define FIGHTER_POINTS (100)
+
 typedef struct FIGHTER
 {
   int isinthefight;
@@ -21,10 +27,24 @@ typedef struct FIGHTER
   Vector2 speed;
 } FIGHTER;
 
-void KillFighter(FIGHTER *f);
-void PlaceFighter(FIGHTER *f);
+typedef struct BULLET
+{
+  int isinthefight;
+  Vector2 pos, speed;
+} BULLET;
 
+void RemoveFighterFromGame(FIGHTER *f);
+void PlaceFighter(FIGHTER *f);
+void PlayerShoot();
+void RemoveBulletFromGame(BULLET *b);
+void HitFighter(FIGHTER *f, BULLET *b);
+// ======================= GLOBALS =========================
 FIGHTER g_fighter[FIGHTERS_COUNT];
+BULLET g_playerbullets[PLAYER_MAX_SHOTS];
+
+Vector2 g_playerspeed;
+Vector2 g_playerpos;
+int g_playerscore;
 
 int main()
 {
@@ -55,6 +75,9 @@ int main()
     if (IsKeyDown(KEY_RIGHT))
       g_playerspeed.x += PLAYER_ACCEL;
 
+    if (IsKeyPressed(KEY_SPACE))
+      PlayerShoot();
+
     if (0 > g_playerspeed.x)
       g_playerspeed.x += PLAYER_FRICTION;
     else
@@ -68,12 +91,13 @@ int main()
     g_playerpos = Vector2Add(g_playerpos, g_playerspeed);
 
     // fighter update
-    int player_hit = 0;
+    int player_hit_a_ship_count = 0;
     Rectangle player_hitbox = {.x = g_playerpos.x,
                                .y = g_playerpos.y + 4, // feels better
                                .width = HITBOX_SIZE,
                                .height = HITBOX_SIZE};
-    Rectangle debug_hitboxes[FIGHTERS_COUNT];
+    Rectangle ship_hitboxes[FIGHTERS_COUNT];
+    Rectangle player_bullet_hitboxes[PLAYER_MAX_SHOTS];
 
     for (int i = 0; i < FIGHTERS_COUNT; ++i)
     {
@@ -86,14 +110,44 @@ int main()
         PlaceFighter(&g_fighter[i]);
 
       g_fighter[i].pos = Vector2Add(g_fighter[i].pos, g_fighter[i].speed);
-      debug_hitboxes[i] =
+      ship_hitboxes[i] =
           (Rectangle){.x = g_fighter[i].pos.x,
                       .y = g_fighter[i].pos.y + 4, // feels better
                       .width = HITBOX_SIZE,
                       .height = HITBOX_SIZE};
-      if (CheckCollisionRecs(debug_hitboxes[i], player_hitbox))
+      if (CheckCollisionRecs(ship_hitboxes[i], player_hitbox))
       {
-        player_hit += 1;
+        player_hit_a_ship_count += 1;
+      }
+    }
+
+    for (int b_idx = 0; b_idx < PLAYER_MAX_SHOTS; ++b_idx)
+    {
+      if (!g_playerbullets[b_idx].isinthefight)
+        continue;
+
+      if (g_playerbullets[b_idx].pos.x > GetScreenWidth() || 0 > g_playerbullets[b_idx].pos.x)
+        RemoveBulletFromGame(&g_playerbullets[b_idx]);
+      if (g_playerbullets[b_idx].pos.y > GetScreenHeight() || 0 > g_playerbullets[b_idx].pos.y)
+        RemoveBulletFromGame(&g_playerbullets[b_idx]);
+
+      g_playerbullets[b_idx].pos = Vector2Add(g_playerbullets[b_idx].pos, g_playerbullets[b_idx].speed);
+
+      player_bullet_hitboxes[b_idx] = (Rectangle){
+          .x = g_playerbullets[b_idx].pos.x,
+          .y = g_playerbullets[b_idx].pos.y + 4,
+          .width = HITBOX_SIZE,
+          .height = HITBOX_SIZE};
+
+      for (int e_idx = 0; e_idx < FIGHTERS_COUNT; e_idx++)
+      {
+        if (!g_fighter[e_idx].isinthefight)
+          continue;
+
+        if (CheckCollisionRecs(ship_hitboxes[e_idx], player_bullet_hitboxes[b_idx]))
+        {
+          HitFighter(&g_fighter[e_idx], &g_playerbullets[b_idx]);
+        }
       }
     }
 
@@ -106,27 +160,56 @@ int main()
       if (g_fighter[i].isinthefight)
       {
 #ifdef DEBUG_HITBOX
-        DrawRectangleRec(debug_hitboxes[i], RED);
+        DrawRectangleRec(ship_hitboxes[i], RED);
 #endif // DEBUG_HITBOX
         DrawText("O", g_fighter[i].pos.x, g_fighter[i].pos.y, 48, BLACK);
       }
     }
+
+    for (int i = 0; i < PLAYER_MAX_SHOTS; ++i)
+    {
+      if (g_playerbullets[i].isinthefight)
+      {
+
+#ifdef DEBUG_HITBOX
+        DrawRectangleRec(player_bullet_hitboxes[i], PURPLE);
+#endif // DEBUG_HITBOX
+        DrawText("#", g_playerbullets[i].pos.x, g_playerbullets[i].pos.y, 48, BLACK);
+      }
+    }
+
 #ifdef DEBUG_HITBOX
     DrawRectangleRec(player_hitbox, YELLOW);
 #endif // DEBUG_HITBOX
+    int bullet_in_count = 0;
+    for (int i = 0; i < PLAYER_MAX_SHOTS; ++i)
+    {
+      if (g_playerbullets[i].isinthefight)
+        bullet_in_count += 1;
+    }
+
     DrawText("X", g_playerpos.x, g_playerpos.y, 48, BLACK);
-    const char *debug = TextFormat("");
+    const char *debug = TextFormat("%d", bullet_in_count);
     DrawText(debug, 10, 10, 12, BLACK);
+
+    if (player_hit_a_ship_count)
+    {
+      ClearBackground(RED);
+      g_playerscore = 0;
+    }
+    const char *score_text = TextFormat("SCORE : %d", g_playerscore);
+    const int score_text_size = 35;
+
+    DrawText(score_text, (GetScreenWidth() / 2) - MeasureText(score_text, score_text_size),
+             20, score_text_size, BLACK);
     EndDrawing();
   }
-
-  DrawFPS(10, 10);
 
   CloseWindow();
   return 0;
 }
 
-void KillFighter(FIGHTER *f)
+void RemoveFighterFromGame(FIGHTER *f)
 {
   f->isinthefight = 0;
   f->respawn_no_place = 0;
@@ -144,7 +227,7 @@ void PlaceFighter(FIGHTER *f)
   }
 
   f->isinthefight = 1;
-  f->respawn_no_place = 120; // ~2 sec
+  f->respawn_no_place = 150;
 
   Vector2 screen_pt = (Vector2){.x = GetRandomValue(0, GetScreenWidth()),
                                 .y = GetRandomValue(0, GetScreenHeight())};
@@ -161,6 +244,35 @@ void PlaceFighter(FIGHTER *f)
       .y = screen_pt.y - spawnpoint.y});
 
   f->speed = Vector2Scale(dhat, FIGHTERS_MAX_SPEED);
+}
 
-  printf("x=%.2f, y=%.2f, pt_th=%.2f\n", spawnpoint.x, spawnpoint.y, pt_thata);
+void PlayerShoot()
+{
+  // todo shoot timer
+
+  for (int i = 0; i < PLAYER_MAX_SHOTS; i++)
+  {
+    if (g_playerbullets[i].isinthefight)
+      continue; // bullet in use
+
+    g_playerbullets[i].isinthefight = 1;
+    g_playerbullets[i].speed = Vector2Scale(Vector2Normalize(g_playerspeed), PLAYER_BULLET_SPEED);
+    g_playerbullets[i].pos = g_playerpos;
+    break;
+  }
+}
+
+void RemoveBulletFromGame(BULLET *b)
+{
+  b->isinthefight = 0;
+  b->pos = (Vector2){.x = 0, .y = 0};
+  b->speed = (Vector2){.x = 0, .y = 0};
+}
+
+void HitFighter(FIGHTER *f, BULLET *b)
+{
+  g_playerscore += FIGHTER_POINTS;
+  f->isinthefight = 0;
+  RemoveBulletFromGame(b);
+  RemoveFighterFromGame(f);
 }

@@ -38,6 +38,7 @@ void PlaceFighter(FIGHTER *f);
 void PlayerShoot();
 void RemoveBulletFromGame(BULLET *b);
 void HitFighter(FIGHTER *f, BULLET *b);
+void ResetAllFighters();
 // ======================= GLOBALS =========================
 FIGHTER g_fighter[FIGHTERS_COUNT];
 BULLET g_playerbullets[PLAYER_MAX_SHOTS];
@@ -46,25 +47,40 @@ Vector2 g_playerspeed;
 Vector2 g_playerpos;
 int g_playerscore;
 
+#define LIVES_STARTING (3)
+int g_level;
+void NextLevel();
+
+int g_lives = LIVES_STARTING; // really 4 lives
+void PlayerHit();             // reset the game state for this level ... delay ... respawn
+void GameOver();
+
 int main()
 {
   InitWindow(600, 400, "Star Fight");
   SetRandomSeed(5432);
   SetTargetFPS(60);
-
-  for (int i = 0; i < FIGHTERS_COUNT; ++i)
-  {
-    g_fighter[i].isinthefight = 0;
-    g_fighter[i].speed = (Vector2){0, 0};
-    g_fighter[i].pos = (Vector2){0, 0};
-    g_fighter[i].respawn_no_place = 0;
-  }
-
-  PlaceFighter(&g_fighter[0]);
-  PlaceFighter(&g_fighter[1]);
+  g_level = 1;
+  ResetAllFighters();
 
   while (!WindowShouldClose())
   {
+    int fighters_in_game = 0;
+    for (int i = 0; i < FIGHTERS_COUNT; i++)
+    {
+      if (g_fighter[i].isinthefight)
+        fighters_in_game += 1;
+    }
+
+    if (fighters_in_game == 0)
+      NextLevel();
+
+    if (g_level == FIGHTERS_COUNT)
+    {
+      printf("You Win!\n");
+      goto ENDGAME;
+    }
+
     // player update
     if (IsKeyDown(KEY_UP))
       g_playerspeed.y -= PLAYER_ACCEL;
@@ -118,6 +134,7 @@ int main()
       if (CheckCollisionRecs(ship_hitboxes[i], player_hitbox))
       {
         player_hit_a_ship_count += 1;
+        PlayerHit();
       }
     }
 
@@ -188,15 +205,15 @@ int main()
         bullet_in_count += 1;
     }
 
-    DrawText("X", g_playerpos.x, g_playerpos.y, 48, BLACK);
-    const char *debug = TextFormat("%d", bullet_in_count);
-    DrawText(debug, 10, 10, 12, BLACK);
-
     if (player_hit_a_ship_count)
     {
       ClearBackground(RED);
-      g_playerscore = 0;
     }
+
+    DrawText("X", g_playerpos.x, g_playerpos.y, 48, BLACK);
+    DrawText(TextFormat("LEVEL : %d", g_level), 10, 10, 12, BLACK);
+    DrawText(TextFormat("LIVES : %d", g_lives), 100, 10, 12, BLACK);
+
     const char *score_text = TextFormat("SCORE : %d", g_playerscore);
     const int score_text_size = 35;
 
@@ -205,8 +222,54 @@ int main()
     EndDrawing();
   }
 
+ENDGAME:
+
   CloseWindow();
   return 0;
+}
+
+void ResetAllFighters()
+{
+
+  for (int i = 0; i < FIGHTERS_COUNT; ++i)
+  {
+    g_fighter[i].isinthefight = 0;
+    g_fighter[i].speed = (Vector2){0, 0};
+    g_fighter[i].pos = (Vector2){0, 0};
+    g_fighter[i].respawn_no_place = 0;
+  }
+}
+
+// reset the game state for this level ... delay ... respawn
+void PlayerHit()
+{
+  g_lives -= 1;
+  if (0 > g_lives)
+    GameOver();
+
+  g_level -= 1;
+
+  ResetAllFighters();
+  NextLevel();
+
+  g_playerpos = (Vector2){.x = GetScreenWidth() / 2, .y = GetScreenHeight() / 2};
+}
+
+void GameOver()
+{
+  g_level = 1;
+  g_lives = LIVES_STARTING;
+  g_playerscore = 0;
+}
+
+void NextLevel()
+{
+  for (int i = 0; i < g_level; ++i)
+  {
+    PlaceFighter(&g_fighter[i]);
+  }
+
+  g_level += 1;
 }
 
 void RemoveFighterFromGame(FIGHTER *f)
